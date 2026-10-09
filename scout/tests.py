@@ -320,6 +320,45 @@ class ScoutTests(TestCase):
         self.assertNotIn("<script>alert(1)</script>", body)
         self.assertIn("&lt;script&gt;", body)
 
+    def test_admin_login_uses_same_throttle(self):
+        for _ in range(10):
+            self.client.post(
+                "/admin/login/", {"username": "missing-admin", "password": "bad"}
+            )
+        self.assertEqual(
+            self.client.post(
+                "/admin/login/", {"username": "missing-admin", "password": "bad"}
+            ).status_code,
+            429,
+        )
+
+    @override_settings(HUBSPOT_PIPELINE="pipeline", HUBSPOT_STAGES={"new": "new-id"})
+    @patch("scout.management.commands.reconcile_job.requests.get")
+    def test_crm_reconciliation_requires_exact_payload(self, get):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from io import StringIO
+
+        job = self.queued("crm")
+        Outbox.objects.filter(pk=job.pk).update(status="unknown")
+        props = {
+            "scout_listing_key": job.payload["key"],
+            "pipeline": "pipeline",
+            "dealstage": "new-id",
+            "amount": "1.00",
+            "dealname": job.payload["title"],
+            "description": "Source listing: " + job.payload["url"],
+            "scout_seller_phone": job.payload["phone"],
+        }
+        get.return_value = Mock()
+        get.return_value.json.return_value = {"id": "321", "properties": props}
+        with self.assertRaises(CommandError):
+            call_command("reconcile_job", str(job.pk), stdout=StringIO())
+        props["amount"] = "18000.00"
+        call_command("reconcile_job", str(job.pk), stdout=StringIO())
+        job.refresh_from_db()
+        self.assertEqual(job.status, "synced")
+
     @override_settings(
         TWILIO_AUTH_TOKEN="fictional-token",
         TWILIO_ACCOUNT_SID="AC" + "b" * 32,
@@ -417,3 +456,66 @@ class ScoutTests(TestCase):
         payload = post.call_args.kwargs["json"]["inputs"][0]
         self.assertEqual(payload["idProperty"], "scout_listing_key")
         self.assertEqual(payload["properties"]["amount"], "18000.00")
+
+
+from django.test import SimpleTestCase
+
+
+@override_settings(FEED_HOSTS={"feed.example.invalid"})
+class FeedTransportTests(SimpleTestCase):
+    def setUp(self):
+        self.source = Source(
+            name="Test feed",
+            url="https://feed.example.invalid/listings?limit=10",
+            authority="Test authorization",
+        )
+
+    @patch(
+        "scout.network.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
+    @patch("scout.network.http.client.HTTPSConnection.request")
+    @patch("scout.network.http.client.HTTPSConnection.getresponse")
+    def test_authorized_json_feed(self, response, request, dns):
+        response.return_value = Mock(status=200)
+        response.return_value.getheader.return_value = "application/json"
+        response.return_value.read1.side_effect = [b'{"listings":[]}', b""]
+        self.assertEqual(fetch_feed(self.source), b'{"listings":[]}')
+        self.assertEqual(request.call_args.args[:2], ("GET", "/listings?limit=10"))
+
+    @patch(
+        "scout.network.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
+    @patch("scout.network.http.client.HTTPSConnection.request")
+    @patch("scout.network.http.client.HTTPSConnection.getresponse")
+    def test_redirect_is_not_followed(self, response, request, dns):
+        response.return_value = Mock(status=302)
+        with self.assertRaises(RuleError):
+            fetch_feed(self.source)
+        request.assert_called_once()
+
+    @patch(
+        "scout.network.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
+    @patch("scout.network.http.client.HTTPSConnection.request")
+    @patch("scout.network.http.client.HTTPSConnection.getresponse")
+    def test_response_size_is_bounded(self, response, request, dns):
+        response.return_value = Mock(status=200)
+        response.return_value.getheader.return_value = "application/json"
+        response.return_value.read1.return_value = b"x" * 65536
+        with self.assertRaises(RuleError):
+            fetch_feed(self.source)
+        self.assertEqual(response.return_value.read1.call_count, 33)
+
+    @patch(
+        "scout.network.socket.getaddrinfo",
+        return_value=[
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("10.0.0.1", 443)),
+        ],
+    )
+    def test_mixed_public_private_dns_is_rejected(self, dns):
+        with self.assertRaises(RuleError):
+            fetch_feed(self.source)

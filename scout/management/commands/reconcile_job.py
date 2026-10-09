@@ -1,4 +1,5 @@
 import requests
+from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -53,7 +54,7 @@ class Command(BaseCommand):
                 f"https://api.hubapi.com/crm/v3/objects/deals/{job.payload['key']}",
                 params={
                     "idProperty": "scout_listing_key",
-                    "properties": "dealstage,scout_listing_key,amount,pipeline",
+                    "properties": "dealstage,scout_listing_key,amount,pipeline,dealname,description,scout_seller_phone",
                 },
                 headers={"Authorization": "Bearer " + settings.HUBSPOT_TOKEN},
                 timeout=(5, 20),
@@ -71,6 +72,20 @@ class Command(BaseCommand):
                 raise CommandError(
                     "Remote mapping/stage differs; investigate before marking synced."
                 )
+            try:
+                amount_matches = (
+                    Decimal(props.get("amount", ""))
+                    == Decimal(job.payload["price_cents"]) / 100
+                )
+            except InvalidOperation:
+                amount_matches = False
+            if (
+                not amount_matches
+                or props.get("dealname") != job.payload["title"]
+                or props.get("scout_seller_phone", "") != job.payload["phone"]
+                or props.get("description") != "Source listing: " + job.payload["url"]
+            ):
+                raise CommandError("Remote payload differs; keep the job on hold.")
             provider_id = str(data["id"])
             status = "synced"
         with transaction.atomic():

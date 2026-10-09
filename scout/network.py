@@ -1,6 +1,6 @@
 """Authorized HTTPS JSON feeds, pinned to a checked public DNS address for each request."""
 
-import http.client, ipaddress, os, re, socket, ssl
+import http.client, ipaddress, os, re, socket, ssl, time
 from urllib.parse import urlsplit
 from django.conf import settings
 from .services import RuleError
@@ -54,9 +54,18 @@ def fetch_feed(source):
             )
         if "application/json" not in response.getheader("Content-Type", ""):
             raise RuleError("Feed must return application/json.")
-        data = response.read(2 * 1024 * 1024 + 1)
-        if len(data) > 2 * 1024 * 1024:
-            raise RuleError("Feed response exceeds 2 MB.")
-        return data
+        chunks, total = [], 0
+        deadline = time.monotonic() + 30
+        while True:
+            if time.monotonic() >= deadline:
+                raise RuleError("Feed body exceeded the 30-second read budget.")
+            chunk = response.read1(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 2 * 1024 * 1024:
+                raise RuleError("Feed response exceeds 2 MB.")
+            chunks.append(chunk)
+        return b"".join(chunks)
     finally:
         client.close()

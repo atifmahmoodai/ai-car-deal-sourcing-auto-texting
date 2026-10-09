@@ -2,7 +2,7 @@
 
 A professional acquisition workspace for a used-car dealership: authorized listing feeds, explainable price comparisons, a four-stage lead pipeline, and owner-reviewed SMS/CRM dispatch. The public client brief is preserved in [docs/original-brief.md](docs/original-brief.md).
 
-**Status:** implementation under final CI verification. This is a single-dealership application, not a completed client installation. No live messages have been sent. Actual marketplace feed access, existing CRM choice/mapping, sender registration, permission records and hosting still require client configuration.
+**Status:** implemented. [GitHub Actions](https://github.com/atifmahmoodai/ai-car-deal-sourcing-auto-texting/actions/workflows/verify.yml) records verification for each revision. This is a single-dealership application, not a completed client installation. No live messages have been sent. Actual marketplace feed access, existing CRM choice/mapping, sender registration, permission records and hosting still require client configuration.
 
 ## What is built
 
@@ -44,7 +44,7 @@ python manage.py test scout
 python manage.py makemigrations --check --dry-run
 ```
 
-The suite covers 28 backend scenarios including atomic/repeated imports, schema rejection, stale/conflicting updates, scoring/currency boundaries, permission and role checks, duplicate suppression, uncertain-provider outcomes, signed callbacks, opt-outs, CSRF, throttling and private-network feed rejection. CI runs on native PostgreSQL 17, tests desktop/mobile browser workflows, checks a database restore, audits locked dependencies and builds the non-root container. Provider tests use mocks; they do not certify a client's live accounts.
+The suite covers 34 backend scenarios including atomic/repeated imports, schema rejection, stale/conflicting updates, scoring/currency boundaries, permission and role checks, duplicate suppression, uncertain-provider outcomes, signed callbacks, opt-outs, CSRF, throttling and private-network feed rejection. CI runs on native PostgreSQL 17, tests desktop/mobile browser workflows, checks a database restore, audits locked dependencies and builds the non-root container. Provider tests use mocks; they do not certify a client's live accounts.
 
 ## Delivery boundaries
 

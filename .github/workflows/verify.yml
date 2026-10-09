@@ -58,10 +58,10 @@ jobs:
         env:
           PGPASSWORD: disposable-ci-app
         run: |
-          pg_dump -h 127.0.0.1 -U scout -Fc scout > /tmp/scout.dump
-          createdb -h 127.0.0.1 -U scout scout_restored
-          pg_restore -h 127.0.0.1 -U scout --no-owner --exit-on-error -d scout_restored /tmp/scout.dump
-          test "$(psql -h 127.0.0.1 -U scout -d scout_restored -Atc 'SELECT COUNT(*) FROM scout_listing')" = 3
+          docker exec ${{ job.services.postgres.id }} pg_dump -U scout -Fc scout > /tmp/scout.dump
+          docker exec ${{ job.services.postgres.id }} createdb -U scout scout_restored
+          docker exec -i ${{ job.services.postgres.id }} pg_restore -U scout --no-owner --exit-on-error -d scout_restored < /tmp/scout.dump
+          test "$(docker exec ${{ job.services.postgres.id }} psql -U scout -d scout_restored -Atc 'SELECT COUNT(*) FROM scout_listing')" = 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
