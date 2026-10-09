@@ -1,0 +1,81 @@
+name: Verify ScoutDesk
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: scout
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: disposable-ci-admin
+        ports: ['5432:5432']
+        options: --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DATABASE_URL: postgresql://scout:disposable-ci-app@127.0.0.1:5432/scout
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare non-superuser database role
+        env:
+          PGPASSWORD: disposable-ci-admin
+        run: |
+          psql -h 127.0.0.1 -U postgres -d scout -v ON_ERROR_STOP=1 -c "CREATE ROLE scout LOGIN CREATEDB NOSUPERUSER PASSWORD 'disposable-ci-app'; ALTER DATABASE scout OWNER TO scout; GRANT ALL ON SCHEMA public TO scout;"
+      - name: Install locked dependencies
+        run: pip install -r requirements.txt pip-audit
+      - name: Security, migration and workflow checks
+        run: |
+          python manage.py collectstatic --noinput
+          python manage.py makemigrations --check --dry-run
+          python manage.py test scout --verbosity 2
+          pip-audit -r requirements.txt
+          ENVIRONMENT=production SECRET_KEY=disposable-ci-secret-key-with-more-than-fifty-characters-2026 PUBLIC_ORIGIN=https://scout.example.invalid ALLOWED_HOSTS=scout.example.invalid python manage.py check --deploy
+      - name: Prepare fictional browser data
+        env:
+          DJANGO_SUPERUSER_USERNAME: demo-owner
+          DJANGO_SUPERUSER_EMAIL: demo@example.invalid
+          DJANGO_SUPERUSER_PASSWORD: Fictional-demo-password-2026
+        run: |
+          python manage.py migrate --noinput
+          python manage.py createsuperuser --noinput
+          python manage.py seed_demo
+          python manage.py runserver 127.0.0.1:8092 --noreload > /tmp/scout-server.log 2>&1 &
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify browser workflows
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+          node scripts/browser-smoke.cjs
+      - name: Verify database restoration
+        env:
+          PGPASSWORD: disposable-ci-app
+        run: |
+          pg_dump -h 127.0.0.1 -U scout -Fc scout > /tmp/scout.dump
+          createdb -h 127.0.0.1 -U scout scout_restored
+          pg_restore -h 127.0.0.1 -U scout --no-owner --exit-on-error -d scout_restored /tmp/scout.dump
+          test "$(psql -h 127.0.0.1 -U scout -d scout_restored -Atc 'SELECT COUNT(*) FROM scout_listing')" = 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoutdesk-browser-evidence
+          path: evidence/
+          retention-days: 7
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -t scoutdesk:test .
+      - name: Verify non-root image and production checks
+        run: |
+          test "$(docker run --rm --entrypoint id scoutdesk:test -u)" = 10001
+          docker run --rm -e ENVIRONMENT=production -e SECRET_KEY=disposable-ci-secret-key-with-more-than-fifty-characters-2026 -e PUBLIC_ORIGIN=https://scout.example.invalid -e ALLOWED_HOSTS=scout.example.invalid -e DATABASE_URL=postgresql://unused:unused@db:5432/scout scoutdesk:test python manage.py check --deploy

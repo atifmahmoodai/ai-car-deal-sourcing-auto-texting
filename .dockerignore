@@ -1,0 +1,9 @@
+.git
+.env
+*.sqlite3
+__pycache__
+staticfiles
+evidence
+backups
+node_modules
+.venv

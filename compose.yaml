@@ -1,0 +1,54 @@
+x-app: &app
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    ENVIRONMENT: production
+    DATABASE_URL: postgresql://scout:${APP_DB_PASSWORD:?Use a random hex database password}@db:5432/scout
+    TRUST_PROXY: '1'
+  depends_on:
+    db:
+      condition: service_healthy
+  networks: [private, edge]
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scout
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set a separate administrator password}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set a random hex app database password}
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ./deploy/init-db.sh:/docker-entrypoint-initdb.d/10-app.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U postgres -d scout]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [private]
+  web:
+    <<: *app
+  worker:
+    <<: *app
+    command: [python, manage.py, run_worker]
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set your approved hostname}
+    ports: ['80:80','443:443']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - proxy_config:/config
+    depends_on: [web]
+    networks: [edge]
+volumes:
+  database:
+  certificates:
+  proxy_config:
+networks:
+  private:
+    internal: true
+  edge:
