@@ -1,0 +1,21 @@
+{
+  "listings": [
+    {
+      "external_id": "EXAMPLE-001",
+      "url": "https://example.invalid/listings/1",
+      "year": 2022,
+      "make": "Toyota",
+      "model": "Camry",
+      "trim": "SE",
+      "vin": "",
+      "mileage": 42000,
+      "price_cents": 1800000,
+      "currency": "USD",
+      "condition": "good",
+      "details": "Fictional schema example only; not a vehicle for sale.",
+      "seller_phone": "",
+      "observed_at": "2026-10-09T00:00:00+00:00",
+      "active": true
+    }
+  ]
+}
